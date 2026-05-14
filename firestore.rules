@@ -1,0 +1,61 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} { allow read, write: if false; }
+    
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null; }
+    
+    function isAdmin() { 
+      let hasEmail = request.auth != null && request.auth.token != null && 'email' in request.auth.token;
+      let isOwnerEmail = hasEmail && request.auth.token.email == 'dev728132@gmail.com';
+      let isDbAdmin = exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+                      get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      return isSignedIn() && (isOwnerEmail || isDbAdmin);
+    }
+    
+    match /users/{userId} {
+      function isValidUser(data) {
+        return data.keys().hasAll(['email', 'role', 'isBanned', 'createdAt', 'walletBalance']) &&
+               data.role is string && (data.role == 'user' || data.role == 'reseller' || data.role == 'admin') &&
+               data.isBanned is bool &&
+               data.walletBalance is number;
+      }
+      
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow delete: if isAdmin();
+    }
+    
+    match /wallet_requests/{requestId} {
+      allow read: if isSignedIn() && (request.auth.uid == resource.data.userId || isAdmin());
+      allow create: if isSignedIn();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    match /orders/{orderId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    match /promos/{promoId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    
+    match /keys/{keyId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+  }
+}
